@@ -35,7 +35,7 @@
     }
     @media print {
     pre > code.sourceCode { white-space: pre-wrap; }
-    pre > code.sourceCode > span { display: inline-block; text-indent: -5em; padding-left: 5em; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
     }
     pre.numberSource code
       { counter-reset: source-line 0; }
@@ -87,45 +87,22 @@
     code span.vs { color: #4070a0; } /* VerbatimString */
     code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
   </style>
-  <link rel="stylesheet" href="https://latex.now.sh/style.min.css" />
+  <link rel="stylesheet" href="https://unpkg.com/latex.css/style.min.css" />
 </head>
 <body>
 <header id="title-block-header">
 <h1 class="title">High Availability Postgres</h1>
 <p class="author">Hannan</p>
 </header>
-<nav id="TOC" role="doc-toc">
-<ul>
-<li><a href="#overview" id="toc-overview">Overview</a>
-<ul>
-<li><a href="#tools" id="toc-tools">Tools</a></li>
-<li><a href="#initial-setup" id="toc-initial-setup">Initial Setup</a>
-<ul>
-<li><a href="#infrastructure"
-id="toc-infrastructure">Infrastructure</a></li>
-<li><a href="#postgres-cluster" id="toc-postgres-cluster">Postgres
-Cluster</a></li>
-</ul></li>
-</ul></li>
-<li><a href="#replication" id="toc-replication">Replication</a>
-<ul>
-<li><a href="#master-1" id="toc-master-1">Master</a></li>
-</ul></li>
-<li><a href="#failover" id="toc-failover">Failover</a></li>
-<li><a href="#references" id="toc-references">References</a>
-<ul>
-<li><a href="#useful-links" id="toc-useful-links">Useful Links</a></li>
-</ul></li>
-</ul>
-</nav>
-<h1 id="overview">Overview</h1>
-<h2 id="tools">Tools</h2>
-<p>Tools that are being used for this demo</p>
+<h2 id="overview">Overview</h2>
+<h3 id="tools">Tools</h3>
+<p>Tools that are being used for this setup:</p>
 <ol type="1">
 <li><a href="https://www.repmgr.org">repmgr</a></li>
+<li><a href="https://nginx.org">nginx</a></li>
 <li><a href="https://www.docker.com">docker</a> (for demo only)</li>
 </ol>
-<h2 id="initial-setup">Initial Setup</h2>
+<h3 id="initial-setup">Initial Setup</h3>
 <p>Change the configuration of the Postgres cluster by tweaking these
 following files:</p>
 <ul>
@@ -133,96 +110,115 @@ following files:</p>
 <li>pg_hba.conf</li>
 </ul>
 <p><em>changing some options may require restart</em></p>
-<h3 id="infrastructure">Infrastructure</h3>
-<h4 id="docker">Docker</h4>
+<h4 id="infrastructure">Infrastructure</h4>
+<h5 id="high-level-solution">High Level Solution</h5>
+<p><img src="./assets/infra.png" /></p>
+<h4 id="postgresql-cluster">PostgreSQL Cluster</h4>
+<p>In this setup, we are setting up two postgres cluster which serve
+as:</p>
+<ul>
+<li>master</li>
+<li>slave</li>
+</ul>
+<h5 id="master">Master</h5>
+<p>Initialize database with prerequisite data.</p>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode sql"><code class="sourceCode sql"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">DATABASE</span> einvoice;</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">ROLE</span> admin_user <span class="kw">WITH</span> LOGIN <span class="kw">PASSWORD</span> <span class="st">&#39;securepassword&#39;</span>;</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">ROLE</span> beaconx_app <span class="kw">WITH</span> LOGIN <span class="kw">PASSWORD</span> <span class="st">&#39;securepassword&#39;</span>;</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="kw">GRANT</span> <span class="kw">ALL</span> <span class="kw">PRIVILEGES</span> <span class="kw">ON</span> <span class="kw">DATABASE</span> einvoice <span class="kw">TO</span> admin_user;</span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="kw">GRANT</span> <span class="kw">ALL</span> <span class="kw">PRIVILEGES</span> <span class="kw">ON</span> <span class="kw">DATABASE</span> einvoice <span class="kw">TO</span> beaconx_app;</span></code></pre></div>
+<p>(optional) Seed database for demo purposes.</p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> master</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./seeder/default.sql</span></span></code></pre></div>
+<h5 id="slave">Slave</h5>
+<p>No configuration needed as it will be managed by
+<code>repmgr</code>.</p>
+<h4 id="repmgr">Repmgr</h4>
+<h5 id="master-1">Master</h5>
+<p>The required configuration that need to be changed for master
+node:</p>
+<p><em>postgresql.conf</em></p>
+<pre class="conf"><code>shared_preload_libraries = &#39;repmgr&#39;
+wal_level = replica
+archive_mode = on
+archive_command = &#39;/bin/true&#39;
+max_wal_senders = 10
+max_replication_slots = 10
+hot_standby = on
+listen_addresses = &#39;*&#39;</code></pre>
+<h4 id="reverse-proxy">Reverse Proxy</h4>
+<p><em>nginx</em> was used to handle the routing of the stack.</p>
+<h5 id="application">Application</h5>
+<p>Configure typical reverse proxy for Laravel application.</p>
+<h5 id="database">Database</h5>
+<p>Below is nginx configuration set up to:</p>
+<ul>
+<li>register postgres intances for for reverse proxy.</li>
+<li>assign instance as standby in case of failover.</li>
+</ul>
+<p><em>pg.conf</em></p>
+<pre class="conf"><code>stream {
+  upstream postgres_backend {
+    server pg-0:5432 max_fails=3 fail_timeout=30s;           # replace with actual ip address
+    server pg-1:5432 max_fails=3 fail_timeout=30s backup;    # replace with actual ip address
+    hash $remote_addr consistent;
+  }
+
+  server {
+    listen 5432 so_keepalive=on;
+
+    proxy_pass postgres_backend;
+  }
+}</code></pre>
+<h4 id="application-1">Application</h4>
+<p>Setup database is Laravel application environment variables:</p>
+<div class="sourceCode" id="cb5"><pre
+class="sourceCode diff"><code class="sourceCode diff"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="va">+ DB_CONNECTION: pgsql</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="va">+ DB_HOST: reverse-proxy</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="va">+ DB_PORT: 5432</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a><span class="va">+ DB_USERNAME: postgres</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a><span class="va">+ DB_PASSWORD: password</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a><span class="va">+ DB_DATABASE: einvoice</span></span></code></pre></div>
+<h3 id="using-docker">Using Docker</h3>
 <p>Image used for this demo is <a
 href="https://hub.docker.com/r/bitnami/postgresql-repmgr/">bitnami/postgresql-repmgr</a>.
 This image already packed with PostgreSQL and repmgr so no further
 installation needed.</p>
 <p><em>if deploying on bare server, installation of PostgreSQL and
 repmgr is required</em></p>
-<p>Creating docker network</p>
-<div class="sourceCode" id="cb1"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> network create beaconx <span class="at">--driver</span> bridge</span></code></pre></div>
-<p>Running master postgres cluster</p>
-<div class="sourceCode" id="cb2"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> master</span>
-<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> compose up <span class="at">-d</span></span></code></pre></div>
-<p>Running slave postgres cluster</p>
-<div class="sourceCode" id="cb3"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> slave</span>
-<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> compose up <span class="at">-d</span></span></code></pre></div>
-<p>Cleanup</p>
-<div class="sourceCode" id="cb4"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> master</span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> compose down</span>
-<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> slave</span>
-<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> compose down</span>
-<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> network rm beaconx</span></code></pre></div>
-<h4 id="bare-server">Bare Server</h4>
-<p><strong>TBC</strong></p>
-<h3 id="postgres-cluster">Postgres Cluster</h3>
-<p>In this demo, we are setting up three postgres cluster which serve
-as:</p>
-<ul>
-<li>master</li>
-<li>slave</li>
-<li>witness (reside in same master’s server)</li>
-</ul>
-<h4 id="master">Master</h4>
-<p>Initialize database with prerequisite data</p>
-<div class="sourceCode" id="cb5"><pre
-class="sourceCode sql"><code class="sourceCode sql"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">DATABASE</span> einvoice;</span>
-<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">ROLE</span> admin_user <span class="kw">WITH</span> LOGIN <span class="kw">PASSWORD</span> <span class="st">&#39;securepassword&#39;</span>;</span>
-<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">ROLE</span> beaconx_app <span class="kw">WITH</span> LOGIN <span class="kw">PASSWORD</span> <span class="st">&#39;securepassword&#39;</span>;</span>
-<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a><span class="kw">GRANT</span> <span class="kw">ALL</span> <span class="kw">PRIVILEGES</span> <span class="kw">ON</span> <span class="kw">DATABASE</span> einvoice <span class="kw">TO</span> admin_user;</span>
-<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a><span class="kw">GRANT</span> <span class="kw">ALL</span> <span class="kw">PRIVILEGES</span> <span class="kw">ON</span> <span class="kw">DATABASE</span> einvoice <span class="kw">TO</span> beaconx_app;</span></code></pre></div>
-<p>(optional) Seed database for demo purposes</p>
+<p>Creating docker network.</p>
 <div class="sourceCode" id="cb6"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./seeder.sh</span></span></code></pre></div>
-<h4 id="slave">Slave</h4>
-<p>No configuration needed as it will be managed by
-<code>repmgr</code></p>
-<h1 id="replication">Replication</h1>
-<h2 id="master-1">Master</h2>
-<p>The required configuration that need to be changed for master
-node:</p>
-<p><em>postgresql.conf</em></p>
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> network create beaconx <span class="at">--driver</span> bridge</span></code></pre></div>
+<p>Running master postgres cluster.</p>
 <div class="sourceCode" id="cb7"><pre
-class="sourceCode conf"><code class="sourceCode toml"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="dt">shared_preload_libraries</span> <span class="op">=</span> <span class="st">&#39;</span><span class="vs">repmgr</span><span class="st">&#39;</span></span>
-<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="dt">wal_level</span> <span class="op">=</span> <span class="dt">replica</span></span>
-<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a><span class="dt">archive_mode</span> <span class="op">=</span> <span class="dt">on</span></span>
-<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a><span class="dt">archive_command</span> <span class="op">=</span> <span class="st">&#39;</span><span class="vs">/bin/true</span><span class="st">&#39;</span></span>
-<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a><span class="dt">max_wal_senders</span> <span class="op">=</span> <span class="dv">10</span></span>
-<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a><span class="dt">max_replication_slots</span> <span class="op">=</span> <span class="dv">10</span></span>
-<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a><span class="dt">hot_standby</span> <span class="op">=</span> <span class="dt">on</span></span>
-<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a><span class="dt">listen_addresses</span> <span class="op">=</span> <span class="st">&#39;</span><span class="vs">*</span><span class="st">&#39;</span></span></code></pre></div>
-<h1 id="failover">Failover</h1>
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> master</span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> compose up <span class="at">-d</span></span></code></pre></div>
+<p>Running slave postgres cluster.</p>
 <div class="sourceCode" id="cb8"><pre
-class="sourceCode diff"><code class="sourceCode diff"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a>...</span>
-<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>services:</span>
-<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>  pg-0:</span>
-<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>  ...</span>
-<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>    environment:</span>
-<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a><span class="st">-      - POSTGRESQL_PASSWORD=adminpassword</span></span>
-<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a><span class="va">+      - POSTGRESQL_PASSWORD=password123</span></span>
-<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a><span class="st">-      - REPMGR_PASSWORD=repmgrpassword</span></span>
-<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a><span class="va">+      - REPMGR_PASSWORD=password123</span></span>
-<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a>  ...</span>
-<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a>  pg-1:</span>
-<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a>  ...</span>
-<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a>  environment:</span>
-<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a><span class="st">-      - POSTGRESQL_PASSWORD=adminpassword</span></span>
-<span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a><span class="va">+      - POSTGRESQL_PASSWORD=password123</span></span>
-<span id="cb8-16"><a href="#cb8-16" aria-hidden="true" tabindex="-1"></a><span class="st">-      - REPMGR_PASSWORD=repmgrpassword</span></span>
-<span id="cb8-17"><a href="#cb8-17" aria-hidden="true" tabindex="-1"></a><span class="va">+      - REPMGR_PASSWORD=password123</span></span>
-<span id="cb8-18"><a href="#cb8-18" aria-hidden="true" tabindex="-1"></a>...</span></code></pre></div>
-<h1 id="references">References</h1>
-<h2 id="useful-links">Useful Links</h2>
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> slave</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> compose up <span class="at">-d</span></span></code></pre></div>
+<p>Cleanup.</p>
+<div class="sourceCode" id="cb9"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> master</span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> compose down</span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> slave</span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> compose down</span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a><span class="ex">docker</span> network rm beaconx</span></code></pre></div>
+<h2 id="known-issue">Known Issue</h2>
+<ol type="1">
+<li><p>Upon recover the master from failover, the reverse proxy remain
+providing traffic to slave which cause an error of: <em>cannot execute
+INSERT in a read-only transaction</em>.</p>
+<p><strong>Expected:</strong> repmgr should make the master as primary
+or reverse proxy should route traffic to primary.</p></li>
+</ol>
+<h2 id="references">References</h2>
 <ul>
 <li><a
 href="https://www.linode.com/docs/guides/manage-replication-failover-on-postgresql-cluster-using-repmgr/">https://www.linode.com/docs/guides/manage-replication-failover-on-postgresql-cluster-using-repmgr</a></li>

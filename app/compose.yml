@@ -1,0 +1,21 @@
+services:
+  app:
+    image: laravelfans/laravel
+    restart: always
+    networks:
+      - beaconx
+    ports:
+      - 8888:80
+    environment:
+      DB_CONNECTION: pgsql
+      DB_HOST: reverse-proxy
+      DB_PORT: 5432
+      DB_USERNAME: postgres
+      DB_PASSWORD: password
+      DB_DATABASE: einvoice
+    volumes:
+      - ./:/var/www/laravel
+
+networks:
+  beaconx:
+    external: true

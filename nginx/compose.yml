@@ -1,0 +1,15 @@
+services:
+  reverse-proxy:
+    image: nginx
+    volumes:
+      #- ./templates:/etc/nginx/templates
+      - ./templates/pg.conf:/etc/nginx/nginx.conf
+    networks:
+      - beaconx
+    ports:
+      - "8080:80"
+      - "5432:5432"
+
+networks:
+  beaconx:
+    external: true

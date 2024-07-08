@@ -2,12 +2,15 @@ services:
   pg-1:
     image: bitnami/postgresql-repmgr
     volumes:
-      - ./data:/bitnami/postgresql
+      - postgres-slave:/bitnami/postgresql
     networks:
       - beaconx
     ports:
       - 5432
     env_file: env
+
+volumes:
+  postgres-slave:
 
 networks:
   beaconx:

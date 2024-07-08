@@ -3,16 +3,18 @@ title: High Availability Postgres
 author: Hannan
 ---
 
-# Overview
+## Overview
 
 
-## Tools
-Tools that are being used for this demo
+### Tools
+Tools that are being used for this setup:
 
 1. [repmgr](https://www.repmgr.org)
+2. [nginx](https://nginx.org)
 2. [docker](https://www.docker.com) (for demo only)
 
-## Initial Setup
+
+### Initial Setup
 Change the configuration of the Postgres cluster by tweaking these following files:
 
 - postgresql.conf
@@ -21,59 +23,23 @@ Change the configuration of the Postgres cluster by tweaking these following fil
 *changing some options may require restart*
 
 
-### Infrastructure
+#### Infrastructure
+
+##### High Level Solution
+
+![](./assets/infra.png)
 
 
-#### Docker
+#### PostgreSQL Cluster
 
-Image used for this demo is [bitnami/postgresql-repmgr](https://hub.docker.com/r/bitnami/postgresql-repmgr/). This image already packed with PostgreSQL and repmgr so no further installation needed.
+In this setup, we are setting up two postgres cluster which serve as:
 
-*if deploying on bare server, installation of PostgreSQL and repmgr is required*
+- master
+- slave
 
-Creating docker network
-```bash
-docker network create beaconx --driver bridge
-```
+##### Master
 
-Running master postgres cluster
-```bash
-cd master
-docker compose up -d
-```
-
-Running slave postgres cluster
-```bash
-cd slave
-docker compose up -d
-```
-
-Cleanup
-```bash
-cd master
-docker compose down
-
-cd slave
-docker compose down
-
-docker network rm beaconx
-```
-
-#### Bare Server
-**TBC**
-
-
-### Postgres Cluster
-
-In this demo, we are setting up three postgres cluster which serve as:
-
-* master
-* slave
-* witness (reside in same master's server)
-
-
-#### Master
-
-Initialize database with prerequisite data
+Initialize database with prerequisite data.
 
 ```sql
 CREATE DATABASE einvoice;
@@ -85,20 +51,21 @@ GRANT ALL PRIVILEGES ON DATABASE einvoice TO admin_user;
 GRANT ALL PRIVILEGES ON DATABASE einvoice TO beaconx_app;
 ```
 
-(optional) Seed database for demo purposes
+(optional) Seed database for demo purposes.
 
 ```bash
-./seeder.sh
+cd master
+./seeder/default.sql
 ```
 
-#### Slave
+##### Slave
 
- No configuration needed as it will be managed by `repmgr`
+No configuration needed as it will be managed by `repmgr`.
 
 
-# Replication
+#### Repmgr
 
-## Master
+##### Master
 
 The required configuration that need to be changed for master node:
 
@@ -114,31 +81,96 @@ hot_standby = on
 listen_addresses = '*'
 ```
 
-# Failover
+#### Reverse Proxy
 
-```diff
-...
-services:
-  pg-0:
-  ...
-    environment:
--      - POSTGRESQL_PASSWORD=adminpassword
-+      - POSTGRESQL_PASSWORD=password123
--      - REPMGR_PASSWORD=repmgrpassword
-+      - REPMGR_PASSWORD=password123
-  ...
-  pg-1:
-  ...
-  environment:
--      - POSTGRESQL_PASSWORD=adminpassword
-+      - POSTGRESQL_PASSWORD=password123
--      - REPMGR_PASSWORD=repmgrpassword
-+      - REPMGR_PASSWORD=password123
-...
+*nginx* was used to handle the routing of the stack.
+
+
+##### Application
+
+Configure typical reverse proxy for Laravel application.
+
+
+##### Database
+
+Below is nginx configuration set up to:
+
+- register postgres intances for for reverse proxy.
+- assign instance as standby in case of failover.
+
+*pg.conf*
+```conf
+stream {
+  upstream postgres_backend {
+    server pg-0:5432 max_fails=3 fail_timeout=30s;           # replace with actual ip address
+    server pg-1:5432 max_fails=3 fail_timeout=30s backup;    # replace with actual ip address
+    hash $remote_addr consistent;
+  }
+
+  server {
+    listen 5432 so_keepalive=on;
+
+    proxy_pass postgres_backend;
+  }
+}
 ```
 
-# References
+#### Application
 
-## Useful Links
+Setup database is Laravel application environment variables:
+
+```diff
++ DB_CONNECTION: pgsql
++ DB_HOST: reverse-proxy
++ DB_PORT: 5432
++ DB_USERNAME: postgres
++ DB_PASSWORD: password
++ DB_DATABASE: einvoice
+```
+
+
+### Using Docker
+
+Image used for this demo is [bitnami/postgresql-repmgr](https://hub.docker.com/r/bitnami/postgresql-repmgr/). This image already packed with PostgreSQL and repmgr so no further installation needed.
+
+*if deploying on bare server, installation of PostgreSQL and repmgr is required*
+
+Creating docker network.
+```bash
+docker network create beaconx --driver bridge
+```
+
+Running master postgres cluster.
+```bash
+cd master
+docker compose up -d
+```
+
+Running slave postgres cluster.
+```bash
+cd slave
+docker compose up -d
+```
+
+Cleanup.
+```bash
+cd master
+docker compose down
+
+cd slave
+docker compose down
+
+docker network rm beaconx
+```
+
+
+## Known Issue
+
+1. Upon recover the master from failover, the reverse proxy remain providing traffic to slave which cause an error of: *cannot execute INSERT in a read-only transaction*.
+
+    **Expected:** repmgr should make the master as primary or reverse proxy should route traffic to primary.
+
+
+## References
 
 - [https://www.linode.com/docs/guides/manage-replication-failover-on-postgresql-cluster-using-repmgr](https://www.linode.com/docs/guides/manage-replication-failover-on-postgresql-cluster-using-repmgr/)

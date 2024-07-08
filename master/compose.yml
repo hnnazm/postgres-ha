@@ -2,12 +2,16 @@ services:
   pg-0:
     image: bitnami/postgresql-repmgr
     volumes:
-      - ./data:/bitnami/postgresql
+      - postgres-master:/bitnami/postgresql
+      - ./seeder:/seeder
     networks:
       - beaconx
     ports:
       - 5432
     env_file: env
+
+volumes:
+  postgres-master:
 
 networks:
   beaconx:
