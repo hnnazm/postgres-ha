@@ -1,0 +1,12 @@
+# register as /etc/systemd/system/postgres-backup.timer
+# start timer instead of service (sudo systemctl enable postgres-backup.timer) (sudo systemctl start postgres-backup.timer)
+
+[Unit]
+Description=Runs daily database backup
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,13 @@
+# register as /etc/systemd/system/postgres-backup.service
+
+[Unit]
+Description=Daily Database Backup
+
+[Service]
+Type=oneshot
+ExecStart=/var/lib/pgsql/16/scripts/backup_db.sh >> /var/lib/pgsql/16/backups/postgres-backup.log 2>&1
+User=postgres
+Group=postgres
+
+[Install]
+WantedBy=multi-user.target
