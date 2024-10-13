@@ -1,0 +1,10 @@
+[Unit]
+Description=Recovers Postgres
+
+[Service]
+ExecStart=/var/lib/pgsql/16/scripts/recover.sh >> /var/lib/pgsql/16/scripts/recover.log 2>&1
+Type=oneshot
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target
